@@ -8,7 +8,6 @@ def message(sockfd):
         message = input()
         sockfd.sendall(message.encode())
 
-
 def recieve(sockfd):
     while True:
         message = sockfd.recv(4096)
