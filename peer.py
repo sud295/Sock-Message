@@ -2,12 +2,12 @@ import socket
 import select
 import threading
 import time
+import copy
 
 def leader_thread(event):
-    print("$Leader Thread Started$")
     global network_participants
     network_participants = []
-    prev_participants = network_participants
+    prev_participants = copy.deepcopy(network_participants)
     participant_sockets = []
 
     while not event.is_set():
@@ -17,7 +17,6 @@ def leader_thread(event):
             message += participant
             message += ","
         message = message[:-1]
-
         if prev_participants != network_participants:
             new_participants = set(network_participants) - set(prev_participants)
             closed_sockets = []
@@ -29,6 +28,7 @@ def leader_thread(event):
                     participant_socket.connect((participant_IP, int(participant_port)))
                     participant_sockets.append(participant_socket)
                 except:
+                    print(f"Could not add new participant {participant_IP}:{participant_port}")
                     continue
 
             for participant_socket in participant_sockets:
@@ -41,7 +41,7 @@ def leader_thread(event):
             for closed_socket in closed_sockets:
                 participant_sockets.remove(closed_socket)
 
-            prev_participants = network_participants
+            prev_participants = copy.deepcopy(network_participants)
         else:
             for participant_socket in participant_sockets:
                 try:
@@ -49,18 +49,15 @@ def leader_thread(event):
                 except:
                     participant_sockets.remove(participant_socket)
                     continue
-
-        print("$Sent Heartbeat$")
     
 def send_thread(event):
-    print("$Send Thread Started$")
     global network_participants
     network_participants = []
     prev_participants = network_participants
     participant_sockets = []
 
     while not event.is_set():
-        message = input("Enter message: ")
+        message = input("")
 
         if message == "$exit":
             event.set()
@@ -100,9 +97,7 @@ def send_thread(event):
                     participant_socket.close()
                     continue
 
-    
 def receive_thread(server_socket, event):
-    print("$Receive Thread Started$")
     global network_participants
     network_participants = []
     connected_clients = {}
@@ -113,6 +108,8 @@ def receive_thread(server_socket, event):
 
     last_heartbeat_time = time.time()
     while not event.is_set():
+        if time.time() - last_heartbeat_time >= 4 and leader == False:
+            print("Leader died")
         try:
             events = poller.poll(-1)
 
@@ -134,13 +131,9 @@ def receive_thread(server_socket, event):
                             # For the leader to add all participant IPs
                             if "$addr$" in data and leader == True:
                                 network_participants.append(data[6:])
-                                print(network_participants)
                             # For the follower to receive heartbeats
                             elif "$HEARTBEAT$" in data and leader == False:
-                                if time.time() - last_heartbeat_time >= 4:
-                                    print("Leader died")
                                 heartbeat = data[11:]
-                                print(heartbeat)
                                 # Split the heartbeat into individual participants
                                 heartbeat_participants = heartbeat.split(",")
                                 # Filter out the current follower's IP and port
@@ -219,8 +212,7 @@ def main():
         leader_IP, leader_port = response.split(":")
 
         leader_port = int(leader_port)
-        
-        print(leader_IP, leader_port)
+
         leader_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         leader_socket.connect((leader_IP, leader_port))
         leader_socket.sendall(f"$addr${HOST}:{PORT}".encode())
