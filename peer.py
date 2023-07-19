@@ -6,9 +6,13 @@ import copy
 from candidate import Candidate
 
 def leader_thread(event, net_part):
+    global new_leader
     global network_participants
     network_participants = copy.deepcopy(net_part)
-    prev_participants = copy.deepcopy(network_participants)
+    if new_leader:
+        prev_participants = []
+    else:
+        prev_participants = copy.deepcopy(network_participants)
     participant_sockets = []
 
     while not event.is_set():
@@ -31,7 +35,7 @@ def leader_thread(event, net_part):
                     participant_sockets.append(participant_socket)
                 except:
                     print(f"Could not add new participant {participant_IP}:{participant_port}")
-                    network_participants.remove(participant)
+                    network_participants.remove(participant)  # Remove participant from the array
                     continue
 
             for participant_socket in participant_sockets:
@@ -44,6 +48,7 @@ def leader_thread(event, net_part):
 
             for closed_socket in closed_sockets:
                 participant_sockets.remove(closed_socket)
+                closed_socket.close()
 
             prev_participants = copy.deepcopy(network_participants)
         else:
@@ -53,8 +58,14 @@ def leader_thread(event, net_part):
                     print(f"SH")
                 except:
                     participant_sockets.remove(participant_socket)
+                    # Handle disconnection and removal of the participant from the array
+                    for participant in network_participants:
+                        participant_IP, participant_port = participant.split(":")
+                        if participant_socket.getpeername() == (participant_IP, int(participant_port)):
+                            network_participants.remove(participant)
+                            break
+                    participant_socket.close()
                     continue
-        
 
 def send_thread(event):
     global network_participants
@@ -161,6 +172,7 @@ def send_term(candidate_term: int, participant: str, rank: list) -> bool:
         return False
 
 def election(event):
+    global new_leader
     global election_ongoing
     global leader
     global candidate
@@ -173,6 +185,7 @@ def election(event):
         if candidate.votes > len(network_participants)//2:
             leader = True
             print("$Leadership Obtained$")
+            new_leader = True
             leader_thr = threading.Thread(target=leader_thread, args=(event,network_participants,))
             leader_thr.start()
             election_ongoing = False
@@ -259,6 +272,8 @@ def receive_thread(server_socket, event):
         client_socket.close()
 
 def main():
+    global new_leader
+
     global voted
     voted = False
 
@@ -294,6 +309,7 @@ def main():
     response = reverse_proxy_socket.recv(1024).decode()
 
     if response == "$yes$":
+        new_leader = False
         reverse_proxy_socket.close()
         leader = True
         print("$Leadership Obtained$")
@@ -314,6 +330,7 @@ def main():
         out.join()
 
     else:
+        new_leader = False
         reverse_proxy_socket.close()
         leader_IP, leader_port = response.split(":")
 
