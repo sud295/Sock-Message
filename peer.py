@@ -3,6 +3,7 @@ import select
 import threading
 import time
 import copy
+from candidate import Candidate
 
 def leader_thread(event):
     global network_participants
@@ -105,6 +106,9 @@ def send_thread(event):
                     continue
 
 def timer_thread(event):
+    global election_ongoing
+    election_ongoing = False
+
     global recieved
     recieved = False
     index = 0
@@ -115,10 +119,59 @@ def timer_thread(event):
         time.sleep(1)
         index += 1
         if index > 3:
-            print("Leader Died")
-            event.set()
+            if not election_ongoing:
+                print("Leader Died")
+                election_thr = threading.Thread(target=election, args=(event,))
+                election_thr.start()
+                election_ongoing = True
         if index == 3 and recieved:
             recieved = False
+
+def send_term(candidate_term: int, participant: str, rank: list) -> bool:
+    rank_str = ""
+    for i in rank:
+        rank_str += str(i)
+        rank_str += ","
+    rank_str = rank_str[:-1]
+
+    message = "$REQUEST VOTE$;" + str(candidate_term) + ";" + rank_str
+
+    try:
+        participant_IP, participant_port = participant.split(":")
+        participant_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        participant_socket.connect((participant_IP, int(participant_port)))
+
+        participant_socket.sendall(message.encode())
+
+        peer_vote = participant_socket.recv(1024).decode()
+        if peer_vote == "$yes$":
+            participant_socket.close()
+            return True
+        else:
+            participant_socket.close()
+            return False
+
+    except Exception as e:
+        print(f"Could not send term to {participant}: {e}")
+        return False
+
+def election(event):
+    global election_ongoing
+    global leader
+    global candidate
+    candidate.term += 1
+
+    for participant in network_participants:
+        if send_term(candidate.term, participant):
+            candidate.votes += 1
+        
+        if candidate.votes > len(network_participants)//2:
+            leader = True
+            print("$Leadership Obtained$")
+            leader_thr = threading.Thread(target=leader_thread, args=(event,))
+            leader_thr.start()
+            election_ongoing = False
+            break
 
 def receive_thread(server_socket, event):
     global network_participants
@@ -129,10 +182,7 @@ def receive_thread(server_socket, event):
 
     poller.register(server_socket, select.POLLIN)
 
-    # last_heartbeat_time = time.time()
     while not event.is_set():
-        # if time.time() - last_heartbeat_time >= 4 and leader == False:
-        #     print("Leader died")
         try:
             events = poller.poll(-1)
 
@@ -156,7 +206,9 @@ def receive_thread(server_socket, event):
                                 network_participants.append(data[6:])
                             # For the follower to receive heartbeats
                             elif "$HEARTBEAT$" in data and leader == False:
+                                global voted
                                 global recieved
+                                voted = False
                                 recieved = True
                                 heartbeat = data[11:]
                                 # Split the heartbeat into individual participants
@@ -167,7 +219,25 @@ def receive_thread(server_socket, event):
                                     if participant != f"{HOST}:{PORT}"
                                 ]
                                 network_participants = filtered_participants
-                                # last_heartbeat_time = time.time()
+                            elif "$REQUEST VOTE$;" in  data:
+                                global candidate
+                                global voted
+                                if not voted:
+                                    data = data.split(";")
+                                    other_term = int(data[1])
+                                    other_rank = data[2].split(",")
+                                    if candidate.term > other_term:
+                                        client_socket.sendall("$no$".encode())
+                                    elif candidate.term < other_term:
+                                        client_socket.sendall("$yes$".encode())
+                                    else:
+                                        if candidate.compare_rank(other_rank):
+                                            client_socket.sendall("$yes$".encode())
+                                        else:
+                                            client_socket.sendall("$no$".encode())
+                                    voted = True
+                                else:
+                                    client_socket.sendall("$no$".encode())
                             else:
                                 print(f"{client_socket.getpeername()}: {data}")
                         else:
@@ -184,6 +254,12 @@ def receive_thread(server_socket, event):
         client_socket.close()
 
 def main():
+    global voted
+    voted = False
+
+    global candidate
+    candidate = Candidate()
+
     global leader
     leader = False
 
