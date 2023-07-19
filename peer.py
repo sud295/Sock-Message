@@ -49,7 +49,7 @@ def leader_thread(event):
                 except:
                     participant_sockets.remove(participant_socket)
                     continue
-    
+
 def send_thread(event):
     global network_participants
     network_participants = []
@@ -104,6 +104,22 @@ def send_thread(event):
                     participant_socket.close()
                     continue
 
+def timer_thread(event):
+    global recieved
+    recieved = False
+    index = 0
+    while not event.is_set():
+        if recieved:
+            recieved = False
+            index = 0
+        time.sleep(1)
+        index += 1
+        if index > 3:
+            print("Leader Died")
+            event.set()
+        if index == 3 and recieved:
+            recieved = False
+
 def receive_thread(server_socket, event):
     global network_participants
     network_participants = []
@@ -113,14 +129,14 @@ def receive_thread(server_socket, event):
 
     poller.register(server_socket, select.POLLIN)
 
-    last_heartbeat_time = time.time()
+    # last_heartbeat_time = time.time()
     while not event.is_set():
+        # if time.time() - last_heartbeat_time >= 4 and leader == False:
+        #     print("Leader died")
         try:
             events = poller.poll(-1)
 
             for fd, ev in events:
-                if time.time() - last_heartbeat_time >= 4 and leader == False:
-                    print("Leader died")
                 if fd == server_socket.fileno():
                     # New connection event
                     client_socket, client_address = server_socket.accept()
@@ -140,6 +156,8 @@ def receive_thread(server_socket, event):
                                 network_participants.append(data[6:])
                             # For the follower to receive heartbeats
                             elif "$HEARTBEAT$" in data and leader == False:
+                                global recieved
+                                recieved = True
                                 heartbeat = data[11:]
                                 # Split the heartbeat into individual participants
                                 heartbeat_participants = heartbeat.split(",")
@@ -149,7 +167,7 @@ def receive_thread(server_socket, event):
                                     if participant != f"{HOST}:{PORT}"
                                 ]
                                 network_participants = filtered_participants
-                                last_heartbeat_time = time.time()
+                                # last_heartbeat_time = time.time()
                             else:
                                 print(f"{client_socket.getpeername()}: {data}")
                         else:
@@ -233,12 +251,15 @@ def main():
 
         inp = threading.Thread(target=receive_thread, args=(server_socket, event,))
         out = threading.Thread(target=send_thread, args=(event,))
+        timer = threading.Thread(target=timer_thread, args=(event,))
 
         inp.start()
         out.start()
+        timer.start()
 
         inp.join()
         out.join()
+        timer.join()
 
 if __name__ == "__main__":
     main()
