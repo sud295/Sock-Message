@@ -53,7 +53,7 @@ def leader_thread(event):
 def send_thread(event):
     global network_participants
     network_participants = []
-    prev_participants = network_participants
+    prev_participants = copy.deepcopy(network_participants)
     participant_sockets = []
 
     while not event.is_set():
@@ -63,10 +63,16 @@ def send_thread(event):
             event.set()
             break
         
+        try:
+            if not leader:
+                leader_socket.sendall(message.encode())
+        except:
+            print("Could not send to leader")
+            
         if prev_participants != network_participants:
             new_participants = set(network_participants) - set(prev_participants)
             closed_sockets = []
-            
+
             for participant in new_participants:
                 participant_IP, participant_port = participant.split(":")
                 participant_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -74,6 +80,7 @@ def send_thread(event):
                     participant_socket.connect((participant_IP, int(participant_port)))
                     participant_sockets.append(participant_socket)
                 except:
+                    print(f"Could not add new participant {participant_IP}:{participant_port}")
                     continue
 
             for participant_socket in participant_sockets:
@@ -87,7 +94,7 @@ def send_thread(event):
                 participant_sockets.remove(closed_socket)
                 closed_socket.close()
 
-            prev_participants = network_participants
+            prev_participants = copy.deepcopy(network_participants)
         else:
             for participant_socket in participant_sockets:
                 try:
@@ -108,12 +115,12 @@ def receive_thread(server_socket, event):
 
     last_heartbeat_time = time.time()
     while not event.is_set():
-        if time.time() - last_heartbeat_time >= 4 and leader == False:
-            print("Leader died")
         try:
             events = poller.poll(-1)
 
             for fd, ev in events:
+                if time.time() - last_heartbeat_time >= 4 and leader == False:
+                    print("Leader died")
                 if fd == server_socket.fileno():
                     # New connection event
                     client_socket, client_address = server_socket.accept()
@@ -213,11 +220,12 @@ def main():
 
         leader_port = int(leader_port)
 
+        global leader_socket
         leader_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         leader_socket.connect((leader_IP, leader_port))
         leader_socket.sendall(f"$addr${HOST}:{PORT}".encode())
 
-        leader_socket.close()
+        #leader_socket.close()
 
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind((HOST, PORT))
