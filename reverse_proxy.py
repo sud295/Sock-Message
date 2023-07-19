@@ -49,11 +49,12 @@ while True:
                         client_socket.sendall(f'{leader_IP}:{leader_port}'.encode())
                     # for re-election where consensus is reached internally
                     elif '$FORCE leader$' in data:
-                        data = data[12:]
+                        data = data[14:]
                         data = data.split(':')
                         leader_IP = data[0]
                         leader_port = data[1]
                         leader_assigned = True
+                        print("Leader Updated")
                 else:
                     # Connection closed by the client
                     print("Connection closed:", client_socket.getpeername())
