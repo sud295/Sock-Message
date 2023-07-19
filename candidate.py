@@ -7,9 +7,9 @@ class Candidate():
     
     def compare_rank(self, other_rank: list) -> bool:
         for i in range(100):
-            if other_rank[i] > self.rank[i]:
+            if int(other_rank[i]) > self.rank[i]:
                 return True
-            elif other_rank[i] < self.rank[i]:
+            elif int(other_rank[i]) < self.rank[i]:
                 return False
         return True
     

@@ -162,7 +162,7 @@ def election(event):
     candidate.term += 1
 
     for participant in network_participants:
-        if send_term(candidate.term, participant):
+        if send_term(candidate.term, participant, candidate.rank):
             candidate.votes += 1
         
         if candidate.votes > len(network_participants)//2:
@@ -174,6 +174,7 @@ def election(event):
             break
 
 def receive_thread(server_socket, event):
+    global voted
     global network_participants
     network_participants = []
     connected_clients = {}
@@ -221,7 +222,6 @@ def receive_thread(server_socket, event):
                                 network_participants = filtered_participants
                             elif "$REQUEST VOTE$;" in  data:
                                 global candidate
-                                global voted
                                 if not voted:
                                     data = data.split(";")
                                     other_term = int(data[1])
