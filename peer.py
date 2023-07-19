@@ -5,9 +5,9 @@ import time
 import copy
 from candidate import Candidate
 
-def leader_thread(event):
+def leader_thread(event, net_part):
     global network_participants
-    network_participants = []
+    network_participants = copy.deepcopy(net_part)
     prev_participants = copy.deepcopy(network_participants)
     participant_sockets = []
 
@@ -18,6 +18,7 @@ def leader_thread(event):
             message += participant
             message += ","
         message = message[:-1]
+        print(message)
         if prev_participants != network_participants:
             new_participants = set(network_participants) - set(prev_participants)
             closed_sockets = []
@@ -30,10 +31,12 @@ def leader_thread(event):
                     participant_sockets.append(participant_socket)
                 except:
                     print(f"Could not add new participant {participant_IP}:{participant_port}")
+                    network_participants.remove(participant)
                     continue
 
             for participant_socket in participant_sockets:
                 try:
+                    print(f"SH")
                     participant_socket.sendall(message.encode())
                 except:
                     closed_sockets.append(participant_socket)
@@ -47,9 +50,11 @@ def leader_thread(event):
             for participant_socket in participant_sockets:
                 try:
                     participant_socket.sendall(message.encode())
+                    print(f"SH")
                 except:
                     participant_sockets.remove(participant_socket)
                     continue
+        
 
 def send_thread(event):
     global network_participants
@@ -112,14 +117,14 @@ def timer_thread(event):
     global recieved
     recieved = False
     index = 0
-    while not event.is_set():
+    while not event.is_set() and not leader:
         if recieved:
             recieved = False
             index = 0
         time.sleep(1)
         index += 1
         if index > 3:
-            if not election_ongoing:
+            if not election_ongoing and not leader:
                 print("Leader Died")
                 election_thr = threading.Thread(target=election, args=(event,))
                 election_thr.start()
@@ -168,7 +173,7 @@ def election(event):
         if candidate.votes > len(network_participants)//2:
             leader = True
             print("$Leadership Obtained$")
-            leader_thr = threading.Thread(target=leader_thread, args=(event,))
+            leader_thr = threading.Thread(target=leader_thread, args=(event,network_participants,))
             leader_thr.start()
             election_ongoing = False
             break
@@ -191,9 +196,8 @@ def receive_thread(server_socket, event):
                 if fd == server_socket.fileno():
                     # New connection event
                     client_socket, client_address = server_socket.accept()
-                    print("New connection from:", client_address)
+                    #print("New connection from:", client_address)
 
-                    # Register the client socket for reading
                     poller.register(client_socket, select.POLLIN)
                     connected_clients[client_socket.fileno()] = client_socket
                     client_sockets.append(client_socket)
@@ -207,6 +211,7 @@ def receive_thread(server_socket, event):
                                 network_participants.append(data[6:])
                             # For the follower to receive heartbeats
                             elif "$HEARTBEAT$" in data and leader == False:
+                                print("RH")
                                 global voted
                                 global recieved
                                 voted = False
@@ -296,7 +301,7 @@ def main():
         server_socket.bind((HOST, PORT))
         server_socket.listen(5)
 
-        lead = threading.Thread(target=leader_thread, args=(event,))
+        lead = threading.Thread(target=leader_thread, args=(event,[],))
         inp = threading.Thread(target=receive_thread, args=(server_socket, event,))
         out = threading.Thread(target=send_thread, args=(event,))
 
