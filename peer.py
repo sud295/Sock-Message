@@ -15,7 +15,7 @@ def main():
         peer_IP = str(input("Specify IP: "))
 
     print("IP being used: " + peer_IP)
-    
+
     peer_port = 0
     try:
         peer_port = int(input("Enter Port: "))
@@ -29,7 +29,6 @@ def main():
     reverse_proxy_port = config["reverse_proxy_port"]
     reverse_proxy_socket.connect((reverse_proxy_host, reverse_proxy_port))
 
-    # Send leader assignment request
     reverse_proxy_socket.sendall(f"$leader${peer_IP}:{peer_port}".encode())
 
     # Receive response from the reverse proxy

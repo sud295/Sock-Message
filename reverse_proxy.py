@@ -43,6 +43,7 @@ def main():
                     data = client_socket.recv(1024).decode()
                     if data:
                         print("Received data:", data)
+                        # The first participant to join the network gets leadership; does not apply to re-election
                         if '$leader$' in data and not leader_assigned:
                             client_socket.sendall('$yes$'.encode())
                             data = data[8:]

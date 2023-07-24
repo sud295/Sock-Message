@@ -42,6 +42,8 @@ class Message_Process:
         # As long as the user does not type $exit
         while not self.event.is_set():
             time.sleep(1.5)
+
+            # This makes sure that every new leader broadcasts its adress to the followers
             if not broadcast_addr and self.new_leader:
                 message = f"$FORCE leader${self.host}:{self.port}"
                 for participant in self.network_participants:
@@ -63,6 +65,8 @@ class Message_Process:
                         self.network_participants.remove(participant)
                         self.participant_dict[participant] = None
                 broadcast_addr = True
+            
+            # This is just the regular hearbeat with information about network participants
             else:
                 message = "$HEARTBEAT$"
                 for participant in self.network_participants:
@@ -90,6 +94,11 @@ class Message_Process:
                         self.participant_dict[participant] = None
 
     def send_thread(self) -> None:
+        '''
+        The send thread defines how messages are sent from one peer to another. 
+        The sending functionality is kept separate from the receiving functionality.
+        '''
+        # Each message contains information about who sent it and the respective username/receiving adress
         while not self.event.is_set():
             message = "$msg$;"
             message += input("")
@@ -100,16 +109,19 @@ class Message_Process:
             message += ";"
             message += self.user_name
 
+            # If the user types $exit, the peer shuts down
             if "$msg$;$exit" in message:
                 self.event.set()
                 break
-            
+
+            # Messages are sent to the leader separately
             if not self.leader:
                 try:
                     self.leader_socket.sendall(message.encode())
                 except:
                     print("Could not send to leader")
-                
+            
+            # Sending messages to all the other peers
             for participant in self.network_participants:
                 sock = self.participant_dict.get(participant)
                 if sock == None:
@@ -130,6 +142,11 @@ class Message_Process:
                     self.participant_dict[participant] = None
 
     def timer_thread(self) -> None:
+        '''
+        The timer thread is a crucial part of the re-election logic.
+        It ensures that after a ceertain amount of time of not receiving a heartbeat from the leader,
+        the follower will assume that the leader is dead and start an election.
+        '''
         self.election_ongoing = False
         self.received = False
         index = 0
@@ -141,6 +158,7 @@ class Message_Process:
             index += 1
             if index > 3:
                 if not self.election_ongoing and not self.leader and not self.received:
+                    # Check if there are enough participants for a majority to even happen
                     if len(self.network_participants)<2:
                         self.event.set()
                         print("Too Few Network Participants")
@@ -152,6 +170,9 @@ class Message_Process:
                     index = 0
 
     def request_vote(self, candidate_term, participant, rank) -> bool:
+        '''
+        This function outlies the logic of requsting a vote from another peer
+        '''
         rank_str = ""
         for i in rank:
             rank_str += str(i)
@@ -180,6 +201,9 @@ class Message_Process:
             return False
         
     def election(self) -> None:
+        '''
+        The election thread orchestrates the enetire election process and decides if the candidate becomes a leader
+        '''
         self.candidate.term += 1
 
         self.election_ongoing = True
@@ -208,11 +232,15 @@ class Message_Process:
                 reverse_proxy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 reverse_proxy_socket.connect((reverse_proxy_host, reverse_proxy_port))
 
-                # Force leader assignment request
+                # Update the reverse proxy on who is the leader so that new joining participants know where to connect
                 reverse_proxy_socket.sendall(f"$FORCE leader${self.host}:{self.port}".encode())
                 break
 
     def receive_thread(self, server_socket) -> None:
+        '''
+        The receive thread receives most communications adressed to the peer.
+        It employs polling to efficiently manage the large number of connections.
+        '''
         self.network_participants = []
         connected_clients = {}
         client_sockets = []
@@ -251,6 +279,7 @@ class Message_Process:
                                 # For the leader to add all participant IPs
                                 if "$addr$" in data and self.leader:
                                     self.network_participants.append(data[6:])
+
                                 # For the follower to receive heartbeats
                                 elif "$HEARTBEAT$" in data and self.leader == False:
                                     self.election_ongoing = False
@@ -264,6 +293,8 @@ class Message_Process:
                                         if participant != f"{self.host}:{self.port}"
                                     ]
                                     self.network_participants = filtered_participants
+
+                                # This block outlines the logic if the peer must vote
                                 elif "$REQUEST VOTE$;" in  data:
                                     if not self.voted:
                                         data = data.split(";")
@@ -298,6 +329,10 @@ class Message_Process:
             client_socket.close()
 
     def start_leader(self):
+        '''
+        This function is called when the first leader in the network is to be started.
+        It serves no other purpose than to kickstart the network.
+        '''
         self.leader = True
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind((self.host, self.port))
@@ -316,6 +351,10 @@ class Message_Process:
         out.join()
     
     def start_follower(self, response):
+        '''
+        This function is called when the follower first joins the network.
+        It serves no other purpose than to kickstart the follower.
+        '''
         leader_IP, leader_port = response.split(":")
 
         leader_port = int(leader_port)
