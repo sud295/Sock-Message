@@ -4,15 +4,21 @@ from message_process import *
 import yaml
 
 def main():
-    config = yaml.read_config('config.yaml')
+    with open("config.yml", "r") as f:
+        config = yaml.safe_load(f)
 
     user_name = input("User Name: ")
 
-    HOST = socket.gethostbyname(socket.gethostname())
+    if input("Auto-generate IP? (y/n): ") == 'y':
+        peer_IP = socket.gethostbyname(socket.gethostname())
+    else:
+        peer_IP = str(input("Specify IP: "))
 
-    PORT = 0
+    print("IP being used: " + peer_IP)
+    
+    peer_port = 0
     try:
-        PORT = int(input("Enter Port: "))
+        peer_port = int(input("Enter Port: "))
     except:
         print("Not a valid port")
         raise SystemExit
@@ -24,14 +30,14 @@ def main():
     reverse_proxy_socket.connect((reverse_proxy_host, reverse_proxy_port))
 
     # Send leader assignment request
-    reverse_proxy_socket.sendall(f"$leader${HOST}:{PORT}".encode())
+    reverse_proxy_socket.sendall(f"$leader${peer_IP}:{peer_port}".encode())
 
     # Receive response from the reverse proxy
     response = reverse_proxy_socket.recv(1024).decode()
 
     reverse_proxy_socket.close()
     
-    system = Message_Process(HOST, PORT, user_name)
+    system = Message_Process(peer_IP, peer_port, user_name)
     if response == "$yes$":
         print("$Leadership Obtained$")
         system.start_leader()
