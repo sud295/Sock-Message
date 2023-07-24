@@ -1,9 +1,11 @@
 import socket
 from candidate import *
 from message_process import *
-from config import *
+import yaml
 
 def main():
+    config = yaml.read_config('config.yaml')
+
     user_name = input("User Name: ")
 
     HOST = socket.gethostbyname(socket.gethostname())
@@ -17,6 +19,8 @@ def main():
 
     # Connect to the reverse proxy server
     reverse_proxy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    reverse_proxy_host = config["reverse_proxy_host"]
+    reverse_proxy_port = config["reverse_proxy_port"]
     reverse_proxy_socket.connect((reverse_proxy_host, reverse_proxy_port))
 
     # Send leader assignment request
