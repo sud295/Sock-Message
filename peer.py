@@ -5,7 +5,7 @@ from message_process import *
 def main():
     user_name = input("User Name: ")
 
-    HOST = '127.0.0.1' #socket.gethostbyname(socket.gethostname())
+    HOST = socket.gethostbyname(socket.gethostname())
 
     PORT = 0
     try:
