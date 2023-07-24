@@ -10,3 +10,14 @@ This project aims to create group-chat-like networks in which each network parti
 ## Election
 The leader of the network is tasked with sending out heartbeat messages at regular intervals. If a follower peer does not receive a heartbeat message for a certain duration of time, it will assume that the leader is dead and initiate an election. During an election, each candidate will request votes from other participants in the network. Upon receiving a request for a vote, a peer will vote "yes" by comparing two objects: term and rank. The term is the current election index. Peers will first compare this number: if the requesting peer's term is greater then the peer will vote "yes". If it is smaller, the peer will vote "no". If it is the same, the comparison moves to the rank. The rank is an array of randomly generated integers. Iterating through the array sequentially, if there is a number in the requesting peer's rank that is greater than the respective index in the voting peer's rank, the voting peer will vote "yes". It will also vote yes if – in the small chance – both the rank and term are the same. It will vote no otherwise. Finally, when a candidate receives the majority vote, it will become the new leader, notify the reverse proxy to redirect participants to itself, and begin sending heartbeat messages to all network participants.
 
+## Instructions
+
+Start the reverse proxy server. Note that it will bind to the address specified in "config.yml".
+```
+python3 reverse_proxy.py
+```
+Start the individual peers.
+```
+python3 peer.py
+```
+The peer will prompt for a username. After this, it will prompt the user to specify if the IP should be derived on its own. Note that some Linux systems will simply use the localhost IP "127.0.0.1" which is why a manual option exists. Finally, the peer will prompt for a port to bind to. After this, connect multiple peers and messages will flow between them.
