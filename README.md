@@ -20,4 +20,6 @@ Start the individual peers.
 ```
 python3 peer.py
 ```
-The peer will prompt for a username. After this, it will prompt the user to specify if the IP should be derived on its own. Note that some Linux systems will simply use the localhost IP "127.0.0.1" which is why a manual option exists. The peer will then prompt for a port to bind to. Finally, connect multiple peers and messages will flow between them. Use $exit to stop.
+The peer will prompt for a username. After this, it will prompt the user to specify if the IP should be derived on its own. Note that some Linux systems will simply use the localhost IP "127.0.0.1" which is why a manual option exists. The peer will then prompt for a port to bind to. Finally, connect multiple peers and messages will flow between them. 
+
+To end a peer, simply type "$exit".
