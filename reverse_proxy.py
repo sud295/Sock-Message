@@ -1,18 +1,18 @@
 import socket
 import select
+from config import *
 
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server_socket.bind(("127.0.0.1", 9001))
+server_socket.bind((reverse_proxy_host, reverse_proxy_port))
 server_socket.listen(5)
 
 poller = select.poll()
 poller.register(server_socket, select.POLLIN)
 
-# Dictionary to keep track of connected clients and their sockets
 connected_clients = {}
 
-print("Server started. Listening for connections...")
+print("Listening for connections...")
 
 leader_assigned = False
 leader_IP = ""

@@ -1,6 +1,7 @@
 import socket
 from candidate import *
 from message_process import *
+from config import *
 
 def main():
     user_name = input("User Name: ")
@@ -13,9 +14,6 @@ def main():
     except:
         print("Not a valid port")
         raise SystemExit
-
-    reverse_proxy_host = "127.0.0.1"
-    reverse_proxy_port = 9001
 
     # Connect to the reverse proxy server
     reverse_proxy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
