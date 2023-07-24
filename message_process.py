@@ -27,6 +27,7 @@ class Message_Process:
         The leader sends heartbeats at regular intervals of 1.5 seconds
         These heartbeat messages contain the adresses of the receiving ends of all network participants
         The leader uses its own port for communicating with the followers so as to not get mixed with the other messages
+        
         '''
 
         # When a new leader is elected, it will broadcast its adress for the followers to note

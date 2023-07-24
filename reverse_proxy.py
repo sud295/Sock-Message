@@ -3,6 +3,7 @@ import select
 import yaml
 
 def main():
+    # Open the config file for the adress to bind to
     with open("config.yml", "r") as f:
         config = yaml.safe_load(f)
     reverse_proxy_host = config["reverse_proxy_host"]

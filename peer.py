@@ -36,6 +36,7 @@ def main():
 
     reverse_proxy_socket.close()
     
+    # Create the messaging system and check to see if this peer is a leader or a follower
     system = Message_Process(peer_IP, peer_port, user_name)
     if response == "$yes$":
         print("$Leadership Obtained$")
