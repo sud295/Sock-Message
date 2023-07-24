@@ -27,40 +27,15 @@ def leader_thread(event, net_part: list) -> None:
     global PORT
 
     network_participants = copy.deepcopy(net_part)
-
+    print("AT THE START:", network_participants)
     global participant_dict
     participant_dict = {}
 
     # As long as the user does not type $exit
     while not event.is_set():
         time.sleep(1.5)
-        message = "$HEARTBEAT$"
-        for participant in network_participants:
-            message += participant
-            message += ","
-        message = message[:-1]
-
-        for participant in network_participants:
-            sock = participant_dict.get(participant)
-            if sock == None:
-                participant_IP, participant_port = participant.split(":")
-                participant_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                try:
-                    participant_socket.connect((participant_IP, int(participant_port)))
-                except:
-                    print(f"Could not add new participant {participant_IP}:{participant_port}")
-                    network_participants.remove(participant)  
-                    continue
-                participant_dict[participant] = participant_socket
-                sock = participant_dict.get(participant)
-            try:
-                sock.sendall(message.encode())
-            except:
-                network_participants.remove(participant)
-                participant_dict[participant] = None
-
         if not broadcast_addr and new_leader:
-            message = f"$FORCE leader${HOST}:{PORT}".encode()
+            message = f"$FORCE leader${HOST}:{PORT}"
             for participant in network_participants:
                 sock = participant_dict.get(participant)
                 if sock == None:
@@ -80,16 +55,42 @@ def leader_thread(event, net_part: list) -> None:
                     network_participants.remove(participant)
                     participant_dict[participant] = None
             broadcast_addr = True
+        else:
+            message = "$HEARTBEAT$"
+            for participant in network_participants:
+                message += participant
+                message += ","
+            message = message[:-1]
 
-        print(message)
+            for participant in network_participants:
+                sock = participant_dict.get(participant)
+                if sock == None:
+                    participant_IP, participant_port = participant.split(":")
+                    participant_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    try:
+                        participant_socket.connect((participant_IP, int(participant_port)))
+                    except:
+                        print(f"Could not add new participant {participant_IP}:{participant_port}")
+                        network_participants.remove(participant)  
+                        continue
+                    participant_dict[participant] = participant_socket
+                    sock = participant_dict.get(participant)
+                try:
+                    sock.sendall(message.encode())
+                except:
+                    print("Here lies the problem")
+                    network_participants.remove(participant)
+                    participant_dict[participant] = None
 
 def send_thread(event) -> None:
     global network_participants
     network_participants = []
     global leader_socket
     global participant_dict
+    participant_dict = {}
 
     while not event.is_set():
+        print(network_participants)
         message = input("")
 
         if message == "$exit":
@@ -100,7 +101,7 @@ def send_thread(event) -> None:
             try:
                 leader_socket.sendall(message.encode())
             except:
-                pass
+                print("Could not send to leader")
             
         for participant in network_participants:
             sock = participant_dict.get(participant)
@@ -188,7 +189,7 @@ def election(event) -> None:
             leader = True
             print("$Leadership Obtained$")
             new_leader = True
-            leader_thr = threading.Thread(target=leader_thread, args=(event,network_participants,))
+            leader_thr = threading.Thread(target=leader_thread, args=(event,copy.deepcopy(network_participants),))
             leader_thr.start()
             election_ongoing = False
 
@@ -221,9 +222,7 @@ def receive_thread(server_socket, event) -> None:
 
             for fd, ev in events:
                 if fd == server_socket.fileno():
-                    # New connection event
-                    client_socket, client_address = server_socket.accept()
-                    #print("New connection from:", client_address)
+                    client_socket, _ = server_socket.accept()
 
                     poller.register(client_socket, select.POLLIN)
                     connected_clients[client_socket.fileno()] = client_socket
@@ -233,14 +232,20 @@ def receive_thread(server_socket, event) -> None:
                     if ev & select.POLLIN:
                         data = client_socket.recv(4096).decode()
                         if data:
-                            # For the leader to add all participant IPs
                             if "$FORCE leader$" in data and not leader:
+                                try:
+                                    leader_socket.close()
+                                except:
+                                    pass
+
                                 data = data[14:]
                                 leader_IP, leader_port = data.split(":")
+                                print(leader_IP,leader_port)
                                 leader_port = int(leader_port)
                                 leader_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                                 leader_socket.connect((leader_IP, leader_port))
-                            if "$addr$" in data and leader == True:
+                            # For the leader to add all participant IPs
+                            if "$addr$" in data and leader:
                                 network_participants.append(data[6:])
                             # For the follower to receive heartbeats
                             elif "$HEARTBEAT$" in data and leader == False:
