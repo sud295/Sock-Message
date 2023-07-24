@@ -1,1 +1,1 @@
-# Sock-Message
+# Peer To Peer Messaging Service
