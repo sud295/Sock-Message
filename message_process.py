@@ -1,9 +1,18 @@
+from candidate import Candidate
+
 import socket
 import select
 import threading
 import time
 import copy
-from candidate import Candidate
+import json
+
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 class Message_Process:
     def __init__(self, host, port, user_name, leader=False):
@@ -20,6 +29,14 @@ class Message_Process:
         self.voted = False
         self.received = False
         self.event = threading.Event()
+        self.curve = ec.SECP256R1()
+        self.shared_key = None
+        self.iv = b'\xf0<\x92)A7\xaf\\\xa6k\xd6\xfc\x99\x88\x03>' #initialization vector
+        self.salt = b'<h\x1az\x94\x89\xec\x907\xe8\xc1\x8e\x03u\xe3\xa1'
+        self.rsa_private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
+        self.rsa_public_key = self.rsa_private_key.public_key()
+        self.private_key = ec.generate_private_key(self.curve, default_backend())
+        self.public_key = self.private_key.public_key()
 
     def leader_thread(self, net_part) -> None:
         '''
@@ -136,12 +153,33 @@ class Message_Process:
                         continue
                     self.participant_dict[participant] = participant_socket
                     sock = self.participant_dict.get(participant)
+                    self.send_encryption_details(sock, True)
                 try:
                     sock.sendall(message.encode())
                 except:
                     self.network_participants.remove(participant)
                     self.participant_dict[participant] = None
 
+    def send_encryption_details(self, sockfd: socket.socket, initiator: bool):
+        signature = self.rsa_private_key.sign(self.public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo), PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
+        if initiator:
+            data_dict = {
+                "rsa_public_key": self.rsa_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
+                "ecdh_public_key": self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
+                "initiator": "true",
+                "identity": f"{self.host}:{self.port}"
+            }
+            json_bytes = json.dumps(data_dict).encode() + signature
+        else:
+            data_dict = {
+                "rsa_public_key": self.rsa_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
+                "ecdh_public_key": self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
+                "initiator": "false",
+                "identity": f"{self.host}:{self.port}"
+            }
+            json_bytes = json.dumps(data_dict).encode() + signature
+        sockfd.sendall(json_bytes)
+    
     def timer_thread(self) -> None:
         '''
         The timer thread is a crucial part of the re-election logic.
@@ -263,59 +301,65 @@ class Message_Process:
                     else:
                         client_socket = connected_clients[fd]
                         if ev & select.POLLIN:
-                            data = client_socket.recv(4096).decode()
+                            data = client_socket.recv(4096)
                             if data:
-                                if "$FORCE leader$" in data and not self.leader:
-                                    self.election_ongoing = False
-                                    self.voted = False
-                                    try:
-                                        self.leader_socket.close()
-                                    except:
-                                        pass
-                                    data = data[14:]
-                                    leader_IP, leader_port = data.split(":")
-                                    leader_port = int(leader_port)
-                                    self.leader_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                                    self.leader_socket.connect((leader_IP, leader_port))
-                                # For the leader to add all participant IPs
-                                if "$addr$" in data and self.leader:
-                                    self.network_participants.append(data[6:])
+                                if data[:46] == b'{"rsa_public_key": "-----BEGIN PUBLIC KEY-----':
+                                    print(True) 
+                                try:
+                                    decoded_data = data.decode()
+                                    if "$FORCE leader$" in decoded_data and not self.leader:
+                                        self.election_ongoing = False
+                                        self.voted = False
+                                        try:
+                                            self.leader_socket.close()
+                                        except:
+                                            pass
+                                        decoded_data = decoded_data[14:]
+                                        leader_IP, leader_port = decoded_data.split(":")
+                                        leader_port = int(leader_port)
+                                        self.leader_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                        self.leader_socket.connect((leader_IP, leader_port))
+                                    # For the leader to add all participant IPs
+                                    if "$addr$" in decoded_data and self.leader:
+                                        self.network_participants.append(decoded_data[6:])
 
-                                # For the follower to receive heartbeats
-                                elif "$HEARTBEAT$" in data and self.leader == False:
-                                    self.election_ongoing = False
-                                    self.received = True
-                                    heartbeat = data[11:]
-                                    # Split the heartbeat into individual participants
-                                    heartbeat_participants = heartbeat.split(",")
-                                    # Filter out the current follower's IP and port
-                                    filtered_participants = [
-                                        participant for participant in heartbeat_participants
-                                        if participant != f"{self.host}:{self.port}"
-                                    ]
-                                    self.network_participants = filtered_participants
+                                    # For the follower to receive heartbeats
+                                    elif "$HEARTBEAT$" in decoded_data and self.leader == False:
+                                        self.election_ongoing = False
+                                        self.received = True
+                                        heartbeat = decoded_data[11:]
+                                        # Split the heartbeat into individual participants
+                                        heartbeat_participants = heartbeat.split(",")
+                                        # Filter out the current follower's IP and port
+                                        filtered_participants = [
+                                            participant for participant in heartbeat_participants
+                                            if participant != f"{self.host}:{self.port}"
+                                        ]
+                                        self.network_participants = filtered_participants
 
-                                # This block outlines the logic if the peer must vote
-                                elif "$REQUEST VOTE$;" in  data:
-                                    if not self.voted:
-                                        data = data.split(";")
-                                        other_term = int(data[1])
-                                        other_rank = data[2].split(",")
-                                        if self.candidate.term > other_term:
-                                            client_socket.sendall("$no$".encode())
-                                        elif self.candidate.term < other_term:
-                                            client_socket.sendall("$yes$".encode())
-                                        else:
-                                            if self.candidate.compare_rank(other_rank):
+                                    # This block outlines the logic if the peer must vote
+                                    elif "$REQUEST VOTE$;" in  decoded_data:
+                                        if not self.voted:
+                                            decoded_data = decoded_data.split(";")
+                                            other_term = int(decoded_data[1])
+                                            other_rank = decoded_data[2].split(",")
+                                            if self.candidate.term > other_term:
+                                                client_socket.sendall("$no$".encode())
+                                            elif self.candidate.term < other_term:
                                                 client_socket.sendall("$yes$".encode())
                                             else:
-                                                client_socket.sendall("$no$".encode())
-                                        self.voted = True
-                                    else:
-                                        client_socket.sendall("$no$".encode())
-                                elif "$msg$" in data:
-                                    data = data.split(";")
-                                    print(f"{data[2]}:{data[3]} ({data[4]}): {data[1]}")
+                                                if self.candidate.compare_rank(other_rank):
+                                                    client_socket.sendall("$yes$".encode())
+                                                else:
+                                                    client_socket.sendall("$no$".encode())
+                                            self.voted = True
+                                        else:
+                                            client_socket.sendall("$no$".encode())
+                                    elif "$msg$" in decoded_data:
+                                        decoded_data = decoded_data.split(";")
+                                        print(f"{decoded_data[2]}:{decoded_data[3]} ({decoded_data[4]}): {decoded_data[1]}")
+                                except:
+                                    continue
                             else:
                                 print(f"{client_socket.getpeername()} Left the Chat")
                                 poller.unregister(client_socket)
