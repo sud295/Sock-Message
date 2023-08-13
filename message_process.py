@@ -46,7 +46,6 @@ class Message_Process:
         The leader sends heartbeats at regular intervals of 1.5 seconds
         These heartbeat messages contain the adresses of the receiving ends of all network participants
         The leader uses its own port for communicating with the followers so as to not get mixed with the other messages
-        
         '''
 
         # When a new leader is elected, it will broadcast its adress for the followers to note
@@ -184,7 +183,7 @@ class Message_Process:
         ciphertext = encryptor.update(msg.encode()) + encryptor.finalize()
         sockfd.sendall(ciphertext)
 
-    def send_encryption_details(self, sockfd: socket.socket, initiator: bool):
+    def send_encryption_details(self, sockfd: socket.socket, initiator: bool, misc = ""):
         signature = self.rsa_private_key.sign(self.public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo), PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
         if initiator:
             data_dict = {
@@ -192,7 +191,8 @@ class Message_Process:
                 "ecdh_public_key": self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
                 "initiator": "true",
                 "identity": f"{self.host}:{self.port}",
-                "signature": signature.hex()
+                "signature": signature.hex(),
+                "misc": "None"
             }
             json_bytes = json.dumps(data_dict).encode()
         else:
@@ -201,7 +201,8 @@ class Message_Process:
                 "ecdh_public_key": self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
                 "initiator": "false",
                 "identity": f"{self.host}:{self.port}",
-                "signature": signature.hex()
+                "signature": signature.hex(),
+                "misc": misc
             }
             json_bytes = json.dumps(data_dict).encode()
         sockfd.sendall(json_bytes)
@@ -339,6 +340,7 @@ class Message_Process:
                                     sig = bytes.fromhex(decoded_dict["signature"])
                                     initiator = True if decoded_dict["initiator"] == "true" else False
                                     identity = decoded_dict["identity"]
+                                    misc = decoded_dict["misc"]
 
                                     try:
                                         peer_rsa_public_key.verify(sig, key, PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
@@ -358,15 +360,16 @@ class Message_Process:
                                     # Now we can add the identity to our key_dict for future encrypted communication
                                     self.key_dict[identity] = aes_key
 
-                                    # The problem is that by creating a new socket to respond, we are associating this socket with its receiving thread instad of the send thread
                                     if initiator:
                                         to_conn_ip, to_conn_port = identity.split(":")
                                         to_respond = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                                         to_respond.connect((to_conn_ip,int(to_conn_port)))
                                         self.send_encryption_details(to_respond, False)
-                                        to_respond.close()
-                                    
+
+                                        # Add it to the partitipants dict to use for subsequent comms
+                                        self.participant_dict[identity] = to_respond
                                     continue
+
                                 try:
                                     decoded_data = data.decode()
                                     if "$FORCE leader$" in decoded_data and not self.leader:
