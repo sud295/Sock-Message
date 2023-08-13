@@ -332,10 +332,15 @@ class Message_Process:
                                     aes_key = kdf.derive(shared_key)
 
                                     # Now we can add the identity to our key_dict for future encrypted communication
-
                                     self.key_dict[identity] = aes_key
 
                                     print(shared_key)
+                                    if initiator:
+                                        to_conn_ip, to_conn_port = identity.split(":")
+                                        to_respond = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                        to_respond.connect((to_conn_ip,int(to_conn_port)))
+                                        self.send_encryption_details(to_respond, False)
+
                                     continue
                                 try:
                                     decoded_data = data.decode()
