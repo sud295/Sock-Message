@@ -39,6 +39,9 @@ class Message_Process:
         self.public_key = self.private_key.public_key()
         self.key_dict = {}
         self.thread_map = {}
+        self.leader_need_to_reconnect = False
+        self.excheanged_with_leader = False
+        self.leader_key = None
 
     def leader_thread(self, net_part) -> None:
         '''
@@ -136,10 +139,41 @@ class Message_Process:
             # Messages are sent to the leader separately
             if not self.leader:
                 try:
-                    self.leader_socket.sendall(message.encode())
+                    if not self.excheanged_with_leader:
+                        print("Connecting...")
+                        leader_ip, leader_port = self.leader_socket.getpeername()
+                        leader_addr = leader_ip+":"+str(leader_port)
+                        self.send_encryption_details(self.leader_socket, True)
+                        self.queue_send(self.leader_socket,leader_addr,message)
+                        self.excheanged_with_leader = True
+                    else:
+                        encryptor = Cipher(algorithms.AES(self.key_dict.get(leader_addr)), modes.CFB(self.iv), backend=default_backend()).encryptor()
+                        ciphertext = encryptor.update(message.encode()) + encryptor.finalize()
+                        self.leader_socket.sendall(ciphertext)
                 except:
                     print("Could not send to leader")
             
+            # New leaders often need new shared keys so this is necessary
+            if self.leader_need_to_reconnect:
+                for participant in self.network_participants:
+                    sock = self.participant_dict.get(participant)
+                    if sock == None:
+                        participant_IP, participant_port = participant.split(":")
+                        participant_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        try:
+                            participant_socket.connect((participant_IP, int(participant_port)))
+                        except:
+                            print(f"Could not add new participant {participant_IP}:{participant_port}")
+                            self.network_participants.remove(participant)  
+                            continue
+                        self.participant_dict[participant] = participant_socket
+                        sock = self.participant_dict.get(participant)
+                    print("Connecting...")
+                    self.send_encryption_details(sock, True)
+                    self.queue_send(sock,participant,message)
+                self.leader_need_to_reconnect = False
+                continue
+
             # Sending messages to all the other peers
             for participant in self.network_participants:
                 sock = self.participant_dict.get(participant)
@@ -154,6 +188,10 @@ class Message_Process:
                         continue
                     self.participant_dict[participant] = participant_socket
                     sock = self.participant_dict.get(participant)
+                    print("Connecting...")
+                    self.send_encryption_details(sock, True)
+                    self.queue_send(sock,participant,message)
+                    continue
                 
                 # key_dict tells us if we've already established a shared key with the peer
                 # if we haven't, we start the process
@@ -253,7 +291,6 @@ class Message_Process:
             participant_socket.connect((participant_IP, int(participant_port)))
 
             participant_socket.sendall(message.encode())
-
             peer_vote = participant_socket.recv(1024).decode()
             if peer_vote == "$yes$":
                 participant_socket.close()
@@ -300,6 +337,7 @@ class Message_Process:
 
                 # Update the reverse proxy on who is the leader so that new joining participants know where to connect
                 reverse_proxy_socket.sendall(f"$FORCE leader${self.host}:{self.port}".encode())
+                self.leader_need_to_reconnect = True
                 break
 
     def receive_thread(self, server_socket) -> None:
@@ -375,6 +413,7 @@ class Message_Process:
                                     if "$FORCE leader$" in decoded_data and not self.leader:
                                         self.election_ongoing = False
                                         self.voted = False
+                                        self.excheanged_with_leader = False
                                         try:
                                             self.leader_socket.close()
                                         except:
@@ -427,10 +466,9 @@ class Message_Process:
                                     # The keys are assgned to the receiving threads so we want to get that adress from the sending thread adress we have
                                     temp_ip,temp_port = client_socket.getpeername()
                                     temp_addr = temp_ip+":"+str(temp_port)
-
-                                    print(temp_addr)
-                                    print("Key", self.key_dict.get(self.thread_map.get(temp_addr)))
-                                    decryptor = Cipher(algorithms.AES(self.key_dict.get(self.thread_map.get(temp_addr))), modes.CFB(self.iv), backend=default_backend()).decryptor()
+                                    key = self.key_dict.get(self.thread_map.get(temp_addr))
+                            
+                                    decryptor = Cipher(algorithms.AES(key), modes.CFB(self.iv), backend=default_backend()).decryptor()
                                     decrypted_text = decryptor.update(data) + decryptor.finalize()
                                     msg = decrypted_text.decode()
                                     msg = msg.split(";")
