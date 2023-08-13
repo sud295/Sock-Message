@@ -9,7 +9,7 @@ import json
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
+from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1, OAEP
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -42,6 +42,7 @@ class Message_Process:
         self.leader_need_to_reconnect = False
         self.excheanged_with_leader = False
         self.leader_key = None
+        self.manager_public_key = None
 
     def leader_thread(self, net_part) -> None:
         '''
@@ -536,3 +537,21 @@ class Message_Process:
         inp.join()
         out.join()
         timer.join()
+    
+    def get_manager_public_key(self):
+        with open("manager_public_key.pem", "rb") as f:
+            rsa_public_key_pem = f.read()
+            self.manager_public_key = serialization.load_pem_public_key(rsa_public_key_pem, backend=default_backend())
+    
+    def send_manager_key(self, manager_socket: socket.socket):
+        rsa_public_key_pem = self.rsa_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        addr = self.host+":"+str(self.port)
+
+        data = {
+            "public_key": rsa_public_key_pem.decode('utf-8'),
+            "address": addr
+        }
+        json_data = json.dumps(data).encode('utf-8')
+
+        encrypted_key = self.manager_public_key.encrypt(json_data, OAEP(mgf=MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+        manager_socket.send(encrypted_key)
