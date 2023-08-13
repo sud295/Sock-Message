@@ -38,6 +38,7 @@ class Message_Process:
         self.private_key = ec.generate_private_key(self.curve, default_backend())
         self.public_key = self.private_key.public_key()
         self.key_dict = {}
+        self.thread_map = {}
 
     def leader_thread(self, net_part) -> None:
         '''
@@ -158,7 +159,9 @@ class Message_Process:
                 # key_dict tells us if we've already established a shared key with the peer
                 # if we haven't, we start the process
                 if self.key_dict.get(participant) == None:
+                    print("Connecting...")
                     self.send_encryption_details(sock, True)
+                    self.queue_send(sock,participant,message)
                     continue
 
                 try:
@@ -169,6 +172,17 @@ class Message_Process:
                 except:
                     self.network_participants.remove(participant)
                     self.participant_dict[participant] = None
+
+    def queue_send(self, sockfd, participant, msg):
+        '''
+        When a message is sent to a new peer, there will be a delay between sending and the keys to be created. 
+        This method will wat until the key is created to send the message.
+        '''
+        while self.key_dict.get(participant) == None:
+            pass
+        encryptor = Cipher(algorithms.AES(self.key_dict.get(participant)), modes.CFB(self.iv), backend=default_backend()).encryptor()
+        ciphertext = encryptor.update(msg.encode()) + encryptor.finalize()
+        sockfd.sendall(ciphertext)
 
     def send_encryption_details(self, sockfd: socket.socket, initiator: bool):
         signature = self.rsa_private_key.sign(self.public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo), PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
@@ -314,9 +328,11 @@ class Message_Process:
                         client_socket = connected_clients[fd]
                         if ev & select.POLLIN:
                             data = client_socket.recv(4096)
-                            #print(data)
                             if data:
                                 if data[:46] == b'{"rsa_public_key": "-----BEGIN PUBLIC KEY-----':
+                                    temp_ip, temp_port = client_socket.getpeername()
+                                    temp_addr = temp_ip+":"+str(temp_port)
+
                                     decoded_dict = json.loads(data.decode())
                                     peer_rsa_public_key = serialization.load_pem_public_key(decoded_dict["rsa_public_key"].encode(), default_backend())
                                     key = decoded_dict["ecdh_public_key"].encode()
@@ -335,16 +351,21 @@ class Message_Process:
                                     shared_key = self.private_key.exchange(ec.ECDH(), peer_public_key)
                                     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), iterations=100000, salt=self.salt, backend=default_backend(), length=32)
                                     aes_key = kdf.derive(shared_key)
+                                    
+                                    # Map the sending thread to the receiving thread
+                                    self.thread_map[temp_addr] = identity
 
                                     # Now we can add the identity to our key_dict for future encrypted communication
                                     self.key_dict[identity] = aes_key
 
+                                    # The problem is that by creating a new socket to respond, we are associating this socket with its receiving thread instad of the send thread
                                     if initiator:
                                         to_conn_ip, to_conn_port = identity.split(":")
                                         to_respond = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                                         to_respond.connect((to_conn_ip,int(to_conn_port)))
                                         self.send_encryption_details(to_respond, False)
                                         to_respond.close()
+                                    
                                     continue
                                 try:
                                     decoded_data = data.decode()
@@ -400,7 +421,17 @@ class Message_Process:
                                         decoded_data = decoded_data.split(";")
                                         print(f"{decoded_data[2]}:{decoded_data[3]} ({decoded_data[4]}): {decoded_data[1]}")
                                 except:
-                                    print(data)
+                                    # The keys are assgned to the receiving threads so we want to get that adress from the sending thread adress we have
+                                    temp_ip,temp_port = client_socket.getpeername()
+                                    temp_addr = temp_ip+":"+str(temp_port)
+
+                                    print(temp_addr)
+                                    print("Key", self.key_dict.get(self.thread_map.get(temp_addr)))
+                                    decryptor = Cipher(algorithms.AES(self.key_dict.get(self.thread_map.get(temp_addr))), modes.CFB(self.iv), backend=default_backend()).decryptor()
+                                    decrypted_text = decryptor.update(data) + decryptor.finalize()
+                                    msg = decrypted_text.decode()
+                                    msg = msg.split(";")
+                                    print(f"{msg[2]}:{msg[3]} ({msg[4]}): {msg[1]}")
                                     continue
                             else:
                                 print(f"{client_socket.getpeername()} Left the Chat")
