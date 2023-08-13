@@ -37,6 +37,7 @@ class Message_Process:
         self.rsa_public_key = self.rsa_private_key.public_key()
         self.private_key = ec.generate_private_key(self.curve, default_backend())
         self.public_key = self.private_key.public_key()
+        self.key_dict = {}
 
     def leader_thread(self, net_part) -> None:
         '''
@@ -153,7 +154,12 @@ class Message_Process:
                         continue
                     self.participant_dict[participant] = participant_socket
                     sock = self.participant_dict.get(participant)
-                    self.send_encryption_details(sock, True)
+
+                    # key_dict tells us if we've already established a shared key with the peer
+                    # if we haven't, we start the process
+                    if self.key_dict.get(participant) == None:
+                        self.send_encryption_details(sock, True)
+                        continue
                 try:
                     sock.sendall(message.encode())
                 except:
@@ -167,17 +173,19 @@ class Message_Process:
                 "rsa_public_key": self.rsa_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
                 "ecdh_public_key": self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
                 "initiator": "true",
-                "identity": f"{self.host}:{self.port}"
+                "identity": f"{self.host}:{self.port}",
+                "signature": signature.hex()
             }
-            json_bytes = json.dumps(data_dict).encode() + signature
+            json_bytes = json.dumps(data_dict).encode()
         else:
             data_dict = {
                 "rsa_public_key": self.rsa_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
                 "ecdh_public_key": self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
                 "initiator": "false",
-                "identity": f"{self.host}:{self.port}"
+                "identity": f"{self.host}:{self.port}",
+                "signature": signature.hex()
             }
-            json_bytes = json.dumps(data_dict).encode() + signature
+            json_bytes = json.dumps(data_dict).encode()
         sockfd.sendall(json_bytes)
     
     def timer_thread(self) -> None:
@@ -304,7 +312,31 @@ class Message_Process:
                             data = client_socket.recv(4096)
                             if data:
                                 if data[:46] == b'{"rsa_public_key": "-----BEGIN PUBLIC KEY-----':
-                                    print(True) 
+                                    decoded_dict = json.loads(data.decode())
+                                    peer_rsa_public_key = serialization.load_pem_public_key(decoded_dict["rsa_public_key"].encode(), default_backend())
+                                    key = decoded_dict["ecdh_public_key"].encode()
+                                    sig = bytes.fromhex(decoded_dict["signature"])
+                                    initiator = True if decoded_dict["initiator"] == "true" else False
+                                    identity = decoded_dict["identity"]
+
+                                    try:
+                                        peer_rsa_public_key.verify(sig, key, PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
+                                    except:
+                                        print("Unable to verify peer identity; aborting connection.")
+                                        continue
+                                    
+                                    # We have passed RSA authentication
+                                    peer_public_key = serialization.load_pem_public_key(key, default_backend())
+                                    shared_key = self.private_key.exchange(ec.ECDH(), peer_public_key)
+                                    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), iterations=100000, salt=self.salt, backend=default_backend(), length=32)
+                                    aes_key = kdf.derive(shared_key)
+
+                                    # Now we can add the identity to our key_dict for future encrypted communication
+
+                                    self.key_dict[identity] = aes_key
+
+                                    print(shared_key)
+                                    continue
                                 try:
                                     decoded_data = data.decode()
                                     if "$FORCE leader$" in decoded_data and not self.leader:
