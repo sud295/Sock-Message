@@ -154,14 +154,18 @@ class Message_Process:
                         continue
                     self.participant_dict[participant] = participant_socket
                     sock = self.participant_dict.get(participant)
+                
+                # key_dict tells us if we've already established a shared key with the peer
+                # if we haven't, we start the process
+                if self.key_dict.get(participant) == None:
+                    self.send_encryption_details(sock, True)
+                    continue
 
-                    # key_dict tells us if we've already established a shared key with the peer
-                    # if we haven't, we start the process
-                    if self.key_dict.get(participant) == None:
-                        self.send_encryption_details(sock, True)
-                        continue
                 try:
-                    sock.sendall(message.encode())
+                    encryptor = Cipher(algorithms.AES(self.key_dict.get(participant)), modes.CFB(self.iv), backend=default_backend()).encryptor()
+                    ciphertext = encryptor.update(message.encode()) + encryptor.finalize()
+                    sock.sendall(ciphertext)
+
                 except:
                     self.network_participants.remove(participant)
                     self.participant_dict[participant] = None
@@ -310,6 +314,7 @@ class Message_Process:
                         client_socket = connected_clients[fd]
                         if ev & select.POLLIN:
                             data = client_socket.recv(4096)
+                            #print(data)
                             if data:
                                 if data[:46] == b'{"rsa_public_key": "-----BEGIN PUBLIC KEY-----':
                                     decoded_dict = json.loads(data.decode())
@@ -334,13 +339,12 @@ class Message_Process:
                                     # Now we can add the identity to our key_dict for future encrypted communication
                                     self.key_dict[identity] = aes_key
 
-                                    print(shared_key)
                                     if initiator:
                                         to_conn_ip, to_conn_port = identity.split(":")
                                         to_respond = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                                         to_respond.connect((to_conn_ip,int(to_conn_port)))
                                         self.send_encryption_details(to_respond, False)
-
+                                        to_respond.close()
                                     continue
                                 try:
                                     decoded_data = data.decode()
@@ -396,6 +400,7 @@ class Message_Process:
                                         decoded_data = decoded_data.split(";")
                                         print(f"{decoded_data[2]}:{decoded_data[3]} ({decoded_data[4]}): {decoded_data[1]}")
                                 except:
+                                    print(data)
                                     continue
                             else:
                                 print(f"{client_socket.getpeername()} Left the Chat")
