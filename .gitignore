@@ -6,3 +6,5 @@ election.py
 __pycache__
 modularized test.py
 test.py
+manager_private_key.pem
+manager_public_key.pem
