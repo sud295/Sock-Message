@@ -12,11 +12,11 @@ def main():
     # Open the config file for the adress to bind to
     with open("config.yml", "r") as f:
         config = yaml.safe_load(f)
-    reverse_proxy_host = config["key_manager_host"]
-    reverse_proxy_port = config["key_manager_port"]
+    host = config["key_manager_host"]
+    port = config["key_manager_port"]
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((reverse_proxy_host, reverse_proxy_port))
+    server_socket.bind((host, port))
     server_socket.listen(5)
 
     poller = select.poll()

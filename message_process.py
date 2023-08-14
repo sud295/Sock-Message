@@ -6,10 +6,11 @@ import threading
 import time
 import copy
 import json
+import yaml
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1, OAEP
+from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1, OAEP, PKCS1v15
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -379,7 +380,6 @@ class Message_Process:
                                     sig = bytes.fromhex(decoded_dict["signature"])
                                     initiator = True if decoded_dict["initiator"] == "true" else False
                                     identity = decoded_dict["identity"]
-                                    misc = decoded_dict["misc"]
 
                                     try:
                                         peer_rsa_public_key.verify(sig, key, PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
@@ -493,6 +493,16 @@ class Message_Process:
         This function is called when the first leader in the network is to be started.
         It serves no other purpose than to kickstart the network.
         '''
+        with open("config.yml", "r") as f:
+            config = yaml.safe_load(f)
+        manager_host = config["key_manager_host"]
+        manager_port = config["key_manager_port"]
+
+        manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        manager_socket.connect((manager_host,manager_port))
+        self.get_manager_public_key()
+        self.send_manager_key(manager_socket)
+
         self.leader = True
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind((self.host, self.port))
@@ -515,6 +525,16 @@ class Message_Process:
         This function is called when the follower first joins the network.
         It serves no other purpose than to kickstart the follower.
         '''
+        with open("config.yml", "r") as f:
+            config = yaml.safe_load(f)
+            manager_host = config["key_manager_host"]
+            manager_port = config["key_manager_port"]
+
+        manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        manager_socket.connect((manager_host,manager_port))
+        self.get_manager_public_key()
+        self.send_manager_key(manager_socket)
+        
         leader_IP, leader_port = response.split(":")
 
         leader_port = int(leader_port)
@@ -554,4 +574,4 @@ class Message_Process:
         json_data = json.dumps(data).encode('utf-8')
 
         encrypted_key = self.manager_public_key.encrypt(json_data, OAEP(mgf=MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-        manager_socket.send(encrypted_key)
+        manager_socket.sendall(encrypted_key)
