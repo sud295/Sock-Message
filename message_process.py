@@ -6,10 +6,11 @@ import threading
 import time
 import copy
 import json
+import yaml
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
+from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1, OAEP, PKCS1v15
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -42,6 +43,8 @@ class Message_Process:
         self.leader_need_to_reconnect = False
         self.excheanged_with_leader = False
         self.leader_key = None
+        self.manager_public_key = None
+        self.manager_socket = None
 
     def leader_thread(self, net_part) -> None:
         '''
@@ -373,12 +376,16 @@ class Message_Process:
                                     temp_addr = temp_ip+":"+str(temp_port)
 
                                     decoded_dict = json.loads(data.decode())
-                                    peer_rsa_public_key = serialization.load_pem_public_key(decoded_dict["rsa_public_key"].encode(), default_backend())
+                                    
                                     key = decoded_dict["ecdh_public_key"].encode()
                                     sig = bytes.fromhex(decoded_dict["signature"])
                                     initiator = True if decoded_dict["initiator"] == "true" else False
                                     identity = decoded_dict["identity"]
-                                    misc = decoded_dict["misc"]
+                                    
+                                    # Now obtain rsa public key from manager to verify signature
+                                    self.manager_socket.sendall(f"$req{identity}".encode())
+                                    key_pem = self.manager_socket.recv(1024)
+                                    peer_rsa_public_key = serialization.load_pem_public_key(key_pem, default_backend())
 
                                     try:
                                         peer_rsa_public_key.verify(sig, key, PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
@@ -492,6 +499,16 @@ class Message_Process:
         This function is called when the first leader in the network is to be started.
         It serves no other purpose than to kickstart the network.
         '''
+        with open("config.yml", "r") as f:
+            config = yaml.safe_load(f)
+        manager_host = config["key_manager_host"]
+        manager_port = config["key_manager_port"]
+
+        self.manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.manager_socket.connect((manager_host,manager_port))
+        self.get_manager_public_key()
+        self.send_manager_key()
+
         self.leader = True
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind((self.host, self.port))
@@ -514,6 +531,16 @@ class Message_Process:
         This function is called when the follower first joins the network.
         It serves no other purpose than to kickstart the follower.
         '''
+        with open("config.yml", "r") as f:
+            config = yaml.safe_load(f)
+            manager_host = config["key_manager_host"]
+            manager_port = config["key_manager_port"]
+
+        self.manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.manager_socket.connect((manager_host,manager_port))
+        self.get_manager_public_key()
+        self.send_manager_key()
+        
         leader_IP, leader_port = response.split(":")
 
         leader_port = int(leader_port)
@@ -536,3 +563,21 @@ class Message_Process:
         inp.join()
         out.join()
         timer.join()
+    
+    def get_manager_public_key(self):
+        with open("manager_public_key.pem", "rb") as f:
+            rsa_public_key_pem = f.read()
+            self.manager_public_key = serialization.load_pem_public_key(rsa_public_key_pem, backend=default_backend())
+    
+    def send_manager_key(self):
+        rsa_public_key_pem = self.rsa_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        addr = self.host+":"+str(self.port)
+
+        data = {
+            "public_key": rsa_public_key_pem.decode('utf-8'),
+            "address": addr
+        }
+        json_data = json.dumps(data).encode('utf-8')
+
+        encrypted_key = self.manager_public_key.encrypt(json_data, OAEP(mgf=MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+        self.manager_socket.sendall(encrypted_key)
