@@ -375,11 +375,24 @@ class Message_Process:
                                     temp_addr = temp_ip+":"+str(temp_port)
 
                                     decoded_dict = json.loads(data.decode())
-                                    peer_rsa_public_key = serialization.load_pem_public_key(decoded_dict["rsa_public_key"].encode(), default_backend())
+                                    
                                     key = decoded_dict["ecdh_public_key"].encode()
                                     sig = bytes.fromhex(decoded_dict["signature"])
                                     initiator = True if decoded_dict["initiator"] == "true" else False
                                     identity = decoded_dict["identity"]
+                                    
+                                    # Now obtain rsa public key from manager to verify signature
+                                    with open("config.yml", "r") as f:
+                                        config = yaml.safe_load(f)
+                                    manager_host = config["key_manager_host"]
+                                    manager_port = config["key_manager_port"]
+
+                                    manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                    manager_socket.connect((manager_host,manager_port))
+                                    manager_socket.sendall(f"$req{identity}".encode())
+                                    key_pem = manager_socket.recv(1024)
+                                    peer_rsa_public_key = serialization.load_pem_public_key(key_pem, default_backend())
+                                    manager_socket.close()
 
                                     try:
                                         peer_rsa_public_key.verify(sig, key, PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
@@ -502,6 +515,7 @@ class Message_Process:
         manager_socket.connect((manager_host,manager_port))
         self.get_manager_public_key()
         self.send_manager_key(manager_socket)
+        manager_socket.close()
 
         self.leader = True
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

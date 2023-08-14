@@ -35,7 +35,7 @@ def main():
             if fd == server_socket.fileno():
                 # New connection event
                 client_socket, client_address = server_socket.accept()
-                print("New connection from:", client_address)
+                #print("New connection from:", client_address)
 
                 # Register the client socket for reading
                 poller.register(client_socket, select.POLLIN)
@@ -63,6 +63,7 @@ def main():
                                 address = json_data["address"]
 
                                 key_map[address] = client_key_pem
+                                print("Ready")
                             except:
                                 print("Authentication Failed")
                     else:
