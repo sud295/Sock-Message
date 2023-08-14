@@ -44,6 +44,7 @@ class Message_Process:
         self.excheanged_with_leader = False
         self.leader_key = None
         self.manager_public_key = None
+        self.manager_socket = None
 
     def leader_thread(self, net_part) -> None:
         '''
@@ -382,17 +383,9 @@ class Message_Process:
                                     identity = decoded_dict["identity"]
                                     
                                     # Now obtain rsa public key from manager to verify signature
-                                    with open("config.yml", "r") as f:
-                                        config = yaml.safe_load(f)
-                                    manager_host = config["key_manager_host"]
-                                    manager_port = config["key_manager_port"]
-
-                                    manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                                    manager_socket.connect((manager_host,manager_port))
-                                    manager_socket.sendall(f"$req{identity}".encode())
-                                    key_pem = manager_socket.recv(1024)
+                                    self.manager_socket.sendall(f"$req{identity}".encode())
+                                    key_pem = self.manager_socket.recv(1024)
                                     peer_rsa_public_key = serialization.load_pem_public_key(key_pem, default_backend())
-                                    manager_socket.close()
 
                                     try:
                                         peer_rsa_public_key.verify(sig, key, PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256())
@@ -511,11 +504,10 @@ class Message_Process:
         manager_host = config["key_manager_host"]
         manager_port = config["key_manager_port"]
 
-        manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        manager_socket.connect((manager_host,manager_port))
+        self.manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.manager_socket.connect((manager_host,manager_port))
         self.get_manager_public_key()
-        self.send_manager_key(manager_socket)
-        manager_socket.close()
+        self.send_manager_key()
 
         self.leader = True
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -544,10 +536,10 @@ class Message_Process:
             manager_host = config["key_manager_host"]
             manager_port = config["key_manager_port"]
 
-        manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        manager_socket.connect((manager_host,manager_port))
+        self.manager_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.manager_socket.connect((manager_host,manager_port))
         self.get_manager_public_key()
-        self.send_manager_key(manager_socket)
+        self.send_manager_key()
         
         leader_IP, leader_port = response.split(":")
 
@@ -577,7 +569,7 @@ class Message_Process:
             rsa_public_key_pem = f.read()
             self.manager_public_key = serialization.load_pem_public_key(rsa_public_key_pem, backend=default_backend())
     
-    def send_manager_key(self, manager_socket: socket.socket):
+    def send_manager_key(self):
         rsa_public_key_pem = self.rsa_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
         addr = self.host+":"+str(self.port)
 
@@ -588,4 +580,4 @@ class Message_Process:
         json_data = json.dumps(data).encode('utf-8')
 
         encrypted_key = self.manager_public_key.encrypt(json_data, OAEP(mgf=MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-        manager_socket.sendall(encrypted_key)
+        self.manager_socket.sendall(encrypted_key)
