@@ -55,7 +55,9 @@ def main():
                                 client_socket.sendall("$Error".encode())
                         else:
                             try:
-                                decrypted_data = get_private_key().decrypt(data, OAEP(mgf=MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+                                decrypted_data = get_private_key().\
+                                decrypt(data, OAEP(mgf=MGF1(algorithm=hashes.SHA256()), 
+                                                   algorithm=hashes.SHA256(), label=None))
 
                                 json_data = json.loads(decrypted_data.decode('utf-8'))
 
